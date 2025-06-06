@@ -1,6 +1,5 @@
 // HandleDamage event handler for enemy (gov/inv) AIs
-
-params ["_unit","_part","_damage","_injurer","_projectile","_hitIndex","_instigator","_hitPoint"];
+params ["_unit","_part","_damage","_injurer","_projectile","_hitIndex","_instigator","_hitPoint", ["_unconsciousChance", 15]];
 
 // Functionality unrelated to Antistasi revive
 if (side group _injurer == teamPlayer) then
@@ -41,11 +40,9 @@ if (side group _injurer == teamPlayer) then
 	// Contact report generation for PvP players
 	if (_part == "" && side group _unit == Occupants) then
 	{
-		// Check if unit is part of a garrison
 		private _marker = _unit getVariable ["markerX",""];
 		if (_marker != "" && {sidesX getVariable [_marker,sideUnknown] == Occupants}) then
 		{
-			// Limit last attack var changes and task updates to once per 30 seconds
 			private _lastAttackTime = garrison getVariable [_marker + "_lastAttack", -30];
 			if (_lastAttackTime + 30 < serverTime) then {
 				garrison setVariable [_marker + "_lastAttack", serverTime, true];
@@ -55,24 +52,18 @@ if (side group _injurer == teamPlayer) then
 	};
 };
 
-// Let ACE medical handle the rest (inc return value) if it's running
+// Let ACE medical handle the rest
 if (A3A_hasACEMedical) exitWith {};
 
-
+// Helper function to make unconscious
 private _makeUnconscious =
 {
 	params ["_unit", "_injurer"];
-   
 	_unit setVariable ["incapacitated",true,true];
 	_unit setVariable ["helpFailed", 0];
 	_unit setUnconscious true;
-	if (vehicle _unit != _unit) then
-	{
-		moveOut _unit;
-	};
-	if (isPlayer _unit) then {_unit allowDamage false};
-	
-	 //Make sure to pass group lead if unit is the leader
+	if (vehicle _unit != _unit) then { moveOut _unit };
+	if (isPlayer _unit) then { _unit allowDamage false };
 	if (_unit == leader (group _unit)) then
 	{
 		private _index = (units (group _unit)) findIf {[_x] call A3A_fnc_canFight};
@@ -80,11 +71,13 @@ private _makeUnconscious =
 			(group _unit) selectLeader ((units (group _unit)) select _index);
 		};
 	};
-	
 	[_unit, group _unit, _injurer] spawn A3A_fnc_AIreactOnKill;
-
 	[_unit,_injurer] spawn A3A_fnc_unconsciousAAF;
 };
+
+// Unconscious chance logic
+private _roll = random 100;
+private _allowUnconscious = (_roll < _unconsciousChance);
 
 if (side _injurer == teamPlayer) then
 {
@@ -92,15 +85,14 @@ if (side _injurer == teamPlayer) then
 	{
 		if (_damage >= 1) then
 		{
-			if (!(_unit getVariable ["incapacitated",false]) && {_unit getVariable ["canBeIncapacitated",true]}) then
+			if (!(_unit getVariable ["incapacitated",false]) && {_unit getVariable ["canBeIncapacitated",true]} && {_allowUnconscious}) then
 			{
 				_damage = 0.9;
 				[_unit,_injurer] call _makeUnconscious;
 			}
 			else
 			{
-				// already unconscious, check whether we're pushed into death
-				_overall = (_unit getVariable ["overallDamage",0]) + (_damage - 1);
+				private _overall = (_unit getVariable ["overallDamage",0]) + (_damage - 1);
 				if (_overall > 0.5) then
 				{
 					_unit removeAllEventHandlers "HandleDamage";
@@ -109,14 +101,11 @@ if (side _injurer == teamPlayer) then
 				{
 					_unit setVariable ["overallDamage",_overall];
 					_damage = 0.9;
-
 				};
 			};
 		}
 		else
 		{
-
-			//Abort helping if hit too hard
 			if (_damage > 0.25) then
 			{
 				if (_unit getVariable ["helping",false]) then
@@ -133,13 +122,11 @@ if (side _injurer == teamPlayer) then
 			if !(_part in ["arms","hands","legs"]) then
 			{
 				_damage = 0.9;
-				// Don't trigger unconsciousness on sub-part hits (face/pelvis etc), only the container
 				if (_part in ["head","body"]) then
 				{
-					if !(_unit getVariable ["incapacitated",false] && {_unit getVariable ["canBeIncapacitated",true]}) then
+					if (!(_unit getVariable ["incapacitated",false]) && {_unit getVariable ["canBeIncapacitated",true]} && {_allowUnconscious}) then
 					{
 						[_unit,_injurer] call _makeUnconscious;
-						
 					};
 				};
 			};
