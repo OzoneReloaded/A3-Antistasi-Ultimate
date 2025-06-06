@@ -1,5 +1,6 @@
 // HandleDamage event handler for rebels and PvPers
-params ["_unit","_part","_damage","_injurer","_projectile","_hitIndex","_instigator","_hitPoint", ["_unconsciousChance", 15]];
+
+params ["_unit","_part","_damage","_injurer","_projectile","_hitIndex","_instigator","_hitPoint"];
 
 // Functionality unrelated to Antistasi revive
 // Helmet popping: use _hitpoint rather than _part to work around ACE calling its fake hitpoint "head"
@@ -45,10 +46,11 @@ if (_part == "" && _damage > 0.1) then
 	};
 };
 
+
 // Let ACE medical handle the rest (inc return value) if it's running
 if (A3A_hasACEMedical) exitWith {};
 
-// Unconscious helper function
+
 private _makeUnconscious =
 {
 	params ["_unit", "_injurer"];
@@ -56,12 +58,12 @@ private _makeUnconscious =
 	_unit setVariable ["helpFailed", 0];
 	_unit setUnconscious true;
 	if (leader _unit == player && _unit == player) then {
-		{
-			_x leaveVehicle (assignedVehicle _x);
-			doGetOut _x; 
-			unassignVehicle _x;
-		} forEach units player;
-	};
+            {
+	        _x leaveVehicle (assignedVehicle _x);
+	        doGetOut _x; 
+                unassignVehicle _x;
+            } forEach units player;
+        };
 	if (vehicle _unit != _unit) then
 	{
 		moveOut _unit;
@@ -76,32 +78,26 @@ private _makeUnconscious =
 	[_unit,_fromside] spawn A3A_fnc_unconscious;
 };
 
-// Random chance logic for unconsciousness
-private _unconsciousRoll = random 100;
-private _allowUnconscious = (_unconsciousRoll < _unconsciousChance);
-
-// Main damage logic
 if (_part == "") then
 {
 	if (_damage >= 1) then
 	{
 		if (side _injurer == civilian) then
 		{
+			// apparently civilians are non-lethal
 			_damage = 0.9;
 		}
 		else
 		{
 			if !(_unit getVariable ["incapacitated",false]) then
 			{
-				if (_allowUnconscious) then {
-					_damage = 0.9;
-					[_unit, _injurer] call _makeUnconscious;
-				};
+				_damage = 0.9;
+				[_unit, _injurer] call _makeUnconscious;
 			}
 			else
 			{
 				// already unconscious, check whether we're pushed into death
-				private _overall = (_unit getVariable ["overallDamage",0]) + (_damage - 1);
+				_overall = (_unit getVariable ["overallDamage",0]) + (_damage - 1);
 				if (_overall > 1) then
 				{
 					if (isPlayer _unit) then
@@ -149,9 +145,7 @@ else
 			{
 				if !(_unit getVariable ["incapacitated",false]) then
 				{
-					if (_allowUnconscious) then {
-						[_unit, _injurer] call _makeUnconscious;
-					};
+					[_unit, _injurer] call _makeUnconscious;
 				};
 			};
 		};
