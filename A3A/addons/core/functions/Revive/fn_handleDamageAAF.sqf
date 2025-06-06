@@ -1,101 +1,114 @@
-// HandleDamage event handler for enemy (gov/inv) AIs
-params ["_unit","_part","_damage","_injurer","_projectile","_hitIndex","_instigator","_hitPoint", ["_unconsciousChance", 15]];
+// HandleDamage event handler for rebels and PvPers
+
+params ["_unit","_part","_damage","_injurer","_projectile","_hitIndex","_instigator","_hitPoint"];
 
 // Functionality unrelated to Antistasi revive
-if (side group _injurer == teamPlayer) then
+// Helmet popping: use _hitpoint rather than _part to work around ACE calling its fake hitpoint "head"
+private _randomNumber = [1,100] call BIS_fnc_randomNum;
+if (_damage >= 1 && {_hitPoint == "hithead"} && {helmetLossChance >= _randomNumber}) then 
 {
-	private _randomNumber = [1,100] call BIS_fnc_randomNum;
-	// Helmet popping: use _hitpoint rather than _part to work around ACE calling its fake hitpoint "head"
-	if (_damage >= 1 && {_hitPoint == "hithead"} && {helmetLossChance >= _randomNumber}) then
+	if (headgear _unit isNotEqualTo "") then 
 	{
-		if (headgear _unit isNotEqualTo "") then 
+		if (headgear _unit isNotEqualTo "" && {_unit getVariable ["A3U_hasHelmetPopped", false] isEqualTo false}) then 
 		{
-			if (headgear _unit isNotEqualTo "" && {_unit getVariable ["A3U_hasHelmetPopped", false] isEqualTo false}) then 
+			_unit setVariable ["A3U_hasHelmetPopped", true, true];
+			removeHeadgear _unit;
+			if (helmetLossSound) then 
 			{
-				_unit setVariable ["A3U_hasHelmetPopped", true, true];
-				removeHeadgear _unit;
-				if (helmetLossSound) then 
-				{
-					[_unit, ["HelmetLoss", 150, 1, 0, 0]] remoteExec ["say3D", 0];
-				};
-			};
-		};
-	};
-
-	private _groupX = group _unit;
-	if (time > _groupX getVariable ["movedToCover",0]) then
-	{
-		if ((behaviour leader _groupX != "COMBAT") and (behaviour leader _groupX != "STEALTH")) then
-		{
-			_groupX setVariable ["movedToCover",time + 120];
-			{[_x,_injurer] spawn A3A_fnc_unitGetToCover} forEach units _groupX;
-		};
-	};
-
-	if (_part == "" && _damage < 1) then 
-	{
-		if (_damage > 0.6) then {[_unit,_injurer] spawn A3A_fnc_unitGetToCover};
-	};
-
-	// Contact report generation for PvP players
-	if (_part == "" && side group _unit == Occupants) then
-	{
-		private _marker = _unit getVariable ["markerX",""];
-		if (_marker != "" && {sidesX getVariable [_marker,sideUnknown] == Occupants}) then
-		{
-			private _lastAttackTime = garrison getVariable [_marker + "_lastAttack", -30];
-			if (_lastAttackTime + 30 < serverTime) then {
-				garrison setVariable [_marker + "_lastAttack", serverTime, true];
-				[_marker, teamPlayer, side group _unit, false, (_injurer getVariable ["isRival", false])] remoteExec ["A3A_fnc_underAttack", 2];
+				[_unit, ["HelmetLoss", 150, 1, 0, 0]] remoteExec ["say3D", 0];
 			};
 		};
 	};
 };
 
-// Let ACE medical handle the rest
+if (_part == "" && _damage > 0.1) then
+{
+	// this will not work the same with ACE, as damage isn't accumulated
+	if (!isPlayer (leader group _unit) && dam < 1.0) then
+	{
+		if (_damage > 0.6) then {[_unit,_injurer] spawn A3A_fnc_unitGetToCover};
+	};
+
+	// Contact report generation for rebels
+	if (side group _injurer == Occupants or side group _injurer == Invaders) then
+	{
+		// Check if unit is part of a rebel garrison
+		private _marker = _unit getVariable ["markerX",""];
+		if (_marker != "" && {sidesX getVariable [_marker,sideUnknown] == teamPlayer}) then
+		{
+			// Limit last attack var changes and task updates to once per 30 seconds
+			private _lastAttackTime = garrison getVariable [_marker + "_lastAttack", -30];
+			if (_lastAttackTime + 30 < serverTime) then {
+				garrison setVariable [_marker + "_lastAttack", serverTime, true];
+				[_marker, side group _injurer, side group _unit, false, (_injurer getVariable ["isRival", false])] remoteExec ["A3A_fnc_underAttack", 2];
+			};
+		};
+	};
+};
+
+
+// Let ACE medical handle the rest (inc return value) if it's running
 if (A3A_hasACEMedical) exitWith {};
 
-// Helper function to make unconscious
+
 private _makeUnconscious =
 {
 	params ["_unit", "_injurer"];
 	_unit setVariable ["incapacitated",true,true];
 	_unit setVariable ["helpFailed", 0];
 	_unit setUnconscious true;
-	if (vehicle _unit != _unit) then { moveOut _unit };
-	if (isPlayer _unit) then { _unit allowDamage false };
-	if (_unit == leader (group _unit)) then
+	if (leader _unit == player && _unit == player) then {
+            {
+	        _x leaveVehicle (assignedVehicle _x);
+	        doGetOut _x; 
+                unassignVehicle _x;
+            } forEach units player;
+        };
+	if (vehicle _unit != _unit) then
 	{
-		private _index = (units (group _unit)) findIf {[_x] call A3A_fnc_canFight};
-		if(_index != -1) then {
-			(group _unit) selectLeader ((units (group _unit)) select _index);
-		};
+		moveOut _unit;
 	};
-	[_unit, group _unit, _injurer] spawn A3A_fnc_AIreactOnKill;
-	[_unit,_injurer] spawn A3A_fnc_unconsciousAAF;
+	if (leader _unit == player && _unit == player) then {
+		{
+			unassignVehicle _x;
+		} forEach units group _unit;
+	};
+	if (isPlayer _unit) then {_unit allowDamage false};
+	private _fromside = if (!isNull _injurer) then {side group _injurer} else {sideUnknown};
+	[_unit,_fromside] spawn A3A_fnc_unconscious;
 };
 
-// Unconscious chance logic
-private _roll = random 100;
-private _allowUnconscious = (_roll < _unconsciousChance);
-
-if (side _injurer == teamPlayer) then
+if (_part == "") then
 {
-	if (_part == "") then
+	if (_damage >= 1) then
 	{
-		if (_damage >= 1) then
+		if (side _injurer == civilian) then
 		{
-			if (!(_unit getVariable ["incapacitated",false]) && {_unit getVariable ["canBeIncapacitated",true]} && {_allowUnconscious}) then
+			// apparently civilians are non-lethal
+			_damage = 0.9;
+		}
+		else
+		{
+			if !(_unit getVariable ["incapacitated",false]) then
 			{
 				_damage = 0.9;
-				[_unit,_injurer] call _makeUnconscious;
+				[_unit, _injurer] call _makeUnconscious;
 			}
 			else
 			{
-				private _overall = (_unit getVariable ["overallDamage",0]) + (_damage - 1);
-				if (_overall > 0.5) then
+				// already unconscious, check whether we're pushed into death
+				_overall = (_unit getVariable ["overallDamage",0]) + (_damage - 1);
+				if (_overall > 1) then
 				{
-					_unit removeAllEventHandlers "HandleDamage";
+					if (isPlayer _unit) then
+					{
+						_damage = 0;
+						[_unit] spawn A3A_fnc_respawn;
+					}
+					else
+					{
+						_unit removeAllEventHandlers "HandleDamage";
+					};
 				}
 				else
 				{
@@ -103,31 +116,36 @@ if (side _injurer == teamPlayer) then
 					_damage = 0.9;
 				};
 			};
-		}
-		else
-		{
-			if (_damage > 0.25) then
-			{
-				if (_unit getVariable ["helping",false]) then
-				{
-					_unit setVariable ["cancelRevive",true];
-				};
-			};
 		};
 	}
 	else
 	{
-		if (_damage >= 1) then
+		if (_damage > 0.25) then
 		{
-			if !(_part in ["arms","hands","legs"]) then
+			if (_unit getVariable ["helping",false]) then
 			{
-				_damage = 0.9;
-				if (_part in ["head","body"]) then
+				_unit setVariable ["cancelRevive",true];
+			};
+			if (isPlayer (leader group _unit)) then
+			{
+				if (!isNull (_unit getVariable ["helped",objNull])) exitWith {};
+				[_unit] call A3A_fnc_askHelp;
+			};
+		};
+	};
+}
+else
+{
+	if (_damage >= 1) then
+	{
+		if !(_part in ["arms","hands","legs"]) then
+		{
+			_damage = 0.9;
+			if (_part in ["head","body"]) then
+			{
+				if !(_unit getVariable ["incapacitated",false]) then
 				{
-					if (!(_unit getVariable ["incapacitated",false]) && {_unit getVariable ["canBeIncapacitated",true]} && {_allowUnconscious}) then
-					{
-						[_unit,_injurer] call _makeUnconscious;
-					};
+					[_unit, _injurer] call _makeUnconscious;
 				};
 			};
 		};
